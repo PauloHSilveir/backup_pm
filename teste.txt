@@ -1,0 +1,22 @@
+cd /home/paulo/trabalho_pratico_PM && python3 -c "
+import sys
+import numpy as np
+from Program.Problem.read_instance import read_instance_from_stdin
+from Program.Problem.decoder import RandomKeyDecoder
+
+instance = read_instance_from_stdin()
+decoder = RandomKeyDecoder(instance)
+
+n_tests = 200
+factible = 0
+chromosome_size = instance.n_tasks + instance.n_workers
+
+for i in range(n_tests):
+    chromosome = np.random.rand(chromosome_size)
+    solution = decoder.decode(chromosome)
+    if solution.is_feasible():
+        factible += 1
+
+print(f'✓ Factibilidade: {factible}/{n_tests} ({100*factible/n_tests:.1f}%)')
+print(f'  Instância: {instance.n_tasks} tarefas, {instance.n_workers} workers')
+" < Instances/28_wee

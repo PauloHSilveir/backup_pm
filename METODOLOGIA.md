@@ -1,231 +1,195 @@
-# Metodologia do Algoritmo RKO-BRKGA para ALWABP
+# Documentação Metodológica - RKO-BRKGA para ALWABP
 
-## 📚 Fundamentação Teórica
+## 1. Meta-heurística: RKO-BRKGA
 
-### O Problema ALWABP
+**RKO (Random Key Optimization)** com **BRKGA (Biased Random-Key Genetic Algorithm)** e **Busca Local**.
 
-O **Assembly Line Worker Assignment and Balancing Problem (ALWABP)** é um problema de otimização combinatória que estende o clássico problema de balanceamento de linhas de produção ao considerar que:
+## 2. Representação do Problema
 
-1. **Trabalhadores são heterogêneos**: Cada trabalhador possui diferentes tempos de execução para cada tarefa
-2. **Restrições de incompatibilidade**: Alguns trabalhadores podem ser incapazes de executar certas tarefas
-3. **Precedências tecnológicas**: As tarefas devem respeitar uma ordem parcial definida por um grafo direcionado acíclico (DAG)
+### Codificação (Cromossomo)
+O problema é representado por **chaves aleatórias** (random keys):
 
-**Objetivo**: Minimizar o tempo de ciclo da linha (tempo da estação mais carregada)
+- **Chaves de tarefas** (n valores): `task_keys[i] ∈ [0,1]` - prioridade da tarefa i
+- **Chaves de trabalhadores** (k valores): `worker_keys[w] ∈ [0,1]` - prioridade do trabalhador w
 
-**Restrições**:
-- Cada tarefa deve ser atribuída a exatamente uma estação
-- Cada estação possui exatamente um trabalhador
-- Cada trabalhador é alocado a exatamente uma estação
-- As precedências devem ser respeitadas: se i ⪯ j, então estação(i) ≤ estação(j)
-- Trabalhadores não podem executar tarefas incompatíveis
+**Tamanho total do cromossomo**: n + k genes (valores reais entre 0 e 1)
 
-## 🧬 BRKGA - Biased Random-Key Genetic Algorithm
+### Decodificação
+O decodificador transforma o cromossomo em uma solução factível:
 
-### Conceito de Chaves Aleatórias
+1. **Atribuição de trabalhadores**: Ordena workers por suas chaves e atribui sequencialmente às estações
+2. **Atribuição de tarefas**: 
+   - Ordena tarefas por suas chaves (maior = maior prioridade)
+   - Processa em múltiplas passagens respeitando precedências
+   - Para cada tarefa, encontra a estação mais cedo possível que:
+     - Respeita precedências (≥ estação de todas as predecessoras)
+     - Tem trabalhador compatível (tempo finito)
+     - Minimiza tempo de estação
 
-O BRKGA utiliza **chaves aleatórias** (random keys) como representação genética:
-- Cada gene é um número real no intervalo [0, 1]
-- A **decodificação** transforma esse vetor de números em uma solução válida
-- Não há necessidade de operadores genéticos especializados
+## 3. Função Objetivo
 
-**Vantagens**:
-- Simplicidade de implementação
-- Garantia de que o crossover sempre gera cromossomos válidos
-- Flexibilidade na decodificação para lidar com restrições
-
-### Estrutura do Cromossomo
-
-Para o ALWABP, o cromossomo possui:
+**Minimizar o tempo de ciclo (makespan):**
 
 ```
-[k₁, k₂, ..., kₙ, w₁, w₂, ..., wₘ]
- └─────────────┘  └─────────────┘
-  Chaves das       Chaves dos
-    tarefas        trabalhadores
+C = max{C_s : s ∈ S}
 ```
 
-- **n genes para tarefas**: Definem a prioridade de atribuição das tarefas
-- **m genes para trabalhadores**: Definem a ordem de alocação dos trabalhadores
+onde `C_s` é o tempo total da estação s:
 
-### Processo de Decodificação
-
-#### 1. Atribuição de Trabalhadores
 ```
-Ordenar trabalhadores por suas chaves (maior = maior prioridade)
-Atribuir os primeiros |S| trabalhadores às estações sequencialmente
+C_s = Σ(t_wi × y_isw)
 ```
 
-#### 2. Atribuição de Tarefas
-```
-Para cada tarefa em ordem de prioridade (maior chave primeiro):
-    Para cada estação s = 0 até |S|-1:
-        Se todas as precedências são satisfeitas:
-            Se o trabalhador pode executar a tarefa:
-                Calcular novo tempo da estação
-                Se é a melhor opção encontrada:
-                    Marcar como candidata
-    
-    Atribuir tarefa à estação candidata
-```
+- `t_wi`: tempo do trabalhador w executar tarefa i
+- `y_isw = 1` se tarefa i é executada por trabalhador w na estação s
 
-Este processo **construtivo** garante que:
-- Precedências são sempre respeitadas
-- Incompatibilidades são evitadas
-- Soluções são sempre factíveis
+## 4. Geração da Solução Inicial
 
-### Componentes do BRKGA
+**População inicial aleatória**:
+- Cada indivíduo tem `n + k` genes
+- Cada gene é sorteado uniformemente em `[0, 1]`
+- População de tamanho `pop_size` (padrão: 50-100 dependendo do tamanho)
 
-#### População
-- **Elite (20%)**: Melhores indivíduos, preservados para a próxima geração
-- **Mutantes (10%)**: Novos indivíduos aleatórios (diversidade)
-- **Descendentes (70%)**: Gerados por crossover
+## 5. BRKGA - Algoritmo Genético
+
+### Parâmetros
+- **População**: 50-200 indivíduos (auto-ajustado por tamanho)
+- **Elite**: 20% dos melhores indivíduos
+- **Mutantes**: 10% de indivíduos aleatórios
+- **Elite bias**: 0.7 (probabilidade de herdar gene do pai elite)
+
+### Operadores
 
 #### Crossover Parametrizado
-
-```
-Para cada gene do cromossomo filho:
-    Com probabilidade ρₑ (elite bias = 0.7):
-        Herdar gene do pai elite
-    Caso contrário:
-        Herdar gene do pai não-elite
+```python
+filho[i] = elite[i]     se rand() < elite_bias
+         = não_elite[i] caso contrário
 ```
 
-**Viés para o elite** (ρₑ = 0.7) significa:
-- 70% dos genes vêm do melhor pai
-- 30% dos genes vêm do outro pai
-- Exploração guiada pelas boas soluções
+#### Mutação
+- 10% da população é substituída por indivíduos completamente aleatórios
 
-## 🔍 Busca Local
+### Seleção
+- **Elite**: preservada integralmente para próxima geração
+- **Crossover**: 70% da nova população (elite × não-elite)
+- **Mutantes**: 10% completamente novos
 
-### Movimentos Implementados
+## 6. Busca Local
 
-#### 1. Task Swap
-```
-Trocar duas tarefas i e j entre estações diferentes
-Verificar:
-  - Precedências mantidas?
-  - Trabalhadores podem executar as tarefas trocadas?
-  - Melhora o tempo de ciclo?
-```
+### Vizinhança
+Três movimentos implementados:
 
-#### 2. Worker Swap
-```
-Trocar dois trabalhadores w₁ e w₂ entre estações
-Verificar:
-  - Trabalhadores podem executar as tarefas de suas novas estações?
-  - Melhora o tempo de ciclo?
-```
+1. **Task Swap**: Troca duas tarefas de estações diferentes
+   ```
+   Swap(task_i, task_j) onde station[i] ≠ station[j]
+   ```
 
-#### 3. Task Move
-```
-Mover tarefa i da estação s₁ para s₂
-Verificar:
-  - Precedências mantidas?
-  - Trabalhador de s₂ pode executar i?
-  - Melhora o tempo de ciclo?
-```
+2. **Worker Swap**: Troca dois trabalhadores de estações diferentes
+   ```
+   Swap(worker_s1, worker_s2) onde s1 ≠ s2
+   ```
 
-### Estratégia de Busca
+3. **Task Move**: Move uma tarefa para outra estação
+   ```
+   Move(task_i, station_old, station_new)
+   ```
 
-- **First Improvement**: Aceita o primeiro movimento que melhora
-- **Parada**: Após N iterações sem melhoria
-- **Aleatorização**: Ordem aleatória de exploração dos vizinhos
+### Estratégia de Escolha
+**First Improvement**: aceita o primeiro movimento que melhora a solução
 
-## 🔄 Hibridização RKO-BRKGA
+### Aplicação
+- Executada periodicamente no melhor indivíduo da elite
+- Frequência: a cada 10-25 gerações (auto-ajustado)
+- Iterações: 30-50 por aplicação
 
-### Algoritmo Principal
+## 7. Integração RKO
+
+O algoritmo alterna entre:
+1. **Fase BRKGA** (exploração): evolução da população
+2. **Fase Busca Local** (intensificação): refinamento do melhor
 
 ```
-1. INICIALIZAÇÃO
-   - Gerar população aleatória
-   - Decodificar cromossomos em soluções
-   - Avaliar fitness (tempo de ciclo)
-
-2. EVOLUÇÃO HÍBRIDA
-   Para cada geração g = 1 até G:
-       a) Classificar população por fitness
-       b) Selecionar elite
-       c) Gerar mutantes
-       d) Gerar descendentes (crossover)
-       e) Avaliar nova população
-       
-       Se g % freq_bl == 0:
-           Aplicar busca local na melhor solução
-           Inserir solução melhorada na população
-
-3. INTENSIFICAÇÃO FINAL
-   Aplicar busca local intensiva na melhor solução global
+Para cada geração:
+  1. Evoluir população (BRKGA)
+  2. Se geração % ls_freq == 0:
+     Aplicar busca local no melhor
 ```
 
-### Balanceamento Exploração vs Explotação
+## 8. Critério de Parada
 
-| Componente | Papel | Parâmetro |
-|------------|-------|-----------|
-| BRKGA | Exploração global | Gerações, tamanho população |
-| Mutantes | Diversidade | 10% da população |
-| Elite | Explotação local | 20% da população |
-| Busca Local | Refinamento | Frequência = 10 gerações |
-| BL Final | Intensificação | 2× iterações |
+**Número fixo de gerações**:
+- 50-200 gerações (auto-ajustado por tamanho da instância)
+- Configurável via linha de comando
 
-## 📊 Parâmetros Recomendados
+## 9. Parâmetros Configuráveis
 
-### Baseados em Literatura e Experimentos
+| Parâmetro | Padrão | Descrição |
+|-----------|--------|-----------|
+| `--seed` | None | Semente aleatória |
+| `--replicas` | 1 | Número de execuções |
+| `--pop-size` | auto | Tamanho da população |
+| `--generations` | auto | Número de gerações |
+| `--elite` | 0.2 | % de elite |
+| `--mutant` | 0.1 | % de mutantes |
+| `--elite-bias` | 0.7 | Viés do crossover |
+| `--ls-freq` | auto | Frequência busca local |
+| `--ls-iters` | auto | Iterações busca local |
 
-| Parâmetro | Valor | Justificativa |
-|-----------|-------|---------------|
-| População | 100-200 | Equilíbrio custo/qualidade |
-| Elite | 20% | Padrão BRKGA |
-| Mutantes | 10% | Diversidade moderada |
-| Elite Bias | 0.7 | Herança forte do melhor |
-| Gerações | 50-200 | Depende do tamanho |
-| Freq. BL | 10 | Não muito frequente |
-| Iter. BL | 50 | Refinamento adequado |
+## 10. Método de Escolha de Parâmetros
 
-### Calibração Recomendada
+### Auto-ajuste por Tamanho
+```python
+if n_tasks ≤ 10:
+    pop=50, gen=50, ls_freq=10, ls_iter=30
+elif n_tasks ≤ 20:
+    pop=100, gen=100, ls_freq=10, ls_iter=50
+elif n_tasks ≤ 40:
+    pop=100, gen=200, ls_freq=25, ls_iter=30
+else:
+    pop=100, gen=100, ls_freq=25, ls_iter=30
+```
 
-Para **instâncias pequenas** (< 15 tarefas):
-- População menor (50-100)
-- Menos gerações (50)
-- BL mais intensiva
+### Calibração Experimental
+Parâmetros fixos calibrados empiricamente:
+- **Elite**: 20% (balança exploração/intensificação)
+- **Mutantes**: 10% (mantém diversidade)
+- **Elite bias**: 0.7 (favorece bons genes)
 
-Para **instâncias grandes** (> 30 tarefas):
-- População maior (150-250)
-- Mais gerações (100-200)
-- BL menos frequente
+## 11. Restrições Tratadas
 
-## 🎯 Características da Abordagem
+1. **Precedências**: Tarefa i antes de j → `station[i] ≤ station[j]`
+2. **Incompatibilidades**: Evita `t_wi = ∞`
+3. **Unicidade**: 
+   - Cada tarefa em exatamente 1 estação
+   - Cada trabalhador em exatamente 1 estação
+   - Cada estação com exatamente 1 trabalhador
 
-### Pontos Fortes
+## 12. Documentação Experimental
 
-1. **Robustez**: Lida bem com restrições complexas
-2. **Qualidade**: Hibridização melhora soluções
-3. **Flexibilidade**: Fácil adaptação para variantes
-4. **Eficiência**: Converge em tempo razoável
+Para métodos estocásticos, o código suporta:
+- **Múltiplas réplicas** (`--replicas N`)
+- **Sementes controladas** (`--seed S`)
+- **Estatísticas agregadas**: média, desvio padrão, melhor/pior
+- **Saída em JSON** com todos os detalhes
 
-### Limitações
+### Exemplo de Execução
+```bash
+python3 main.py solution.json --seed 42 --replicas 5 < instancia.txt
+```
 
-1. **Parâmetros sensíveis**: Requer calibração
-2. **Decodificação custosa**: Pode ser gargalo computacional
-3. **Garantias**: Não garante ótimo global
+Saída:
+- **stdout**: melhor tempo de ciclo
+- **stderr**: estatísticas (média, desvio, tempo)
+- **JSON**: solução completa com parâmetros
 
-## 📖 Referências Metodológicas
+## 13. Referências
 
-### BRKGA
-- Bean, J. C. (1994). Genetic algorithms and random keys for sequencing and optimization
-- Gonçalves, J. F., & Resende, M. G. (2011). Biased random-key genetic algorithms for combinatorial optimization
+### Algoritmo Base
+- GONÇALVES, J. F.; RESENDE, M. G. C. **Biased random-key genetic algorithms for combinatorial optimization**. Journal of Heuristics, v. 17, n. 5, p. 487-525, 2011.
 
-### ALWABP
-- Miralles, C., et al. (2007). Advantages of assembly lines in sheltered work centres for disabled
-- Moreira, M. C. O., & Costa, A. M. (2013). Hybrid heuristics for planning job rotation schedules in assembly lines with heterogeneous workers
+### Problema
+- MIRALLES, C. et al. **Advantages of assembly lines in Sheltered Work Centres for Disabled. A case study**. International Journal of Production Economics, v. 110, n. 1-2, p. 187-197, 2007.
 
-### Hibridização
-- Resende, M. G., & Ribeiro, C. C. (2016). Optimization by GRASP: Greedy Randomized Adaptive Search Procedures
-- Talbi, E. G. (2009). Metaheuristics: from design to implementation
-
-## 💡 Extensões Possíveis
-
-1. **Path Relinking**: Conectar soluções elite
-2. **Multi-objetivo**: Considerar outros critérios (balanceamento, ergonomia)
-3. **Memória de longo prazo**: Registrar boas configurações
-4. **Paralelização**: Executar BL em múltiplas soluções simultaneamente
-5. **Aprendizado**: Adaptar parâmetros durante a execução
+### Implementação
+- Código original desenvolvido para trabalho prático de Programação Matemática
+- NumPy para operações numéricas eficientes

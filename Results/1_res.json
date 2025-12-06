@@ -1,0 +1,80 @@
+{
+  "cycle_time": 102.0,
+  "feasible": true,
+  "task_assignment": [
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    2,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    2,
+    3,
+    3,
+    3,
+    2,
+    0,
+    0,
+    2,
+    1,
+    2,
+    0,
+    3,
+    2,
+    2,
+    3
+  ],
+  "worker_assignment": [
+    2,
+    3,
+    0,
+    1
+  ],
+  "station_times": [
+    102.0,
+    102.0,
+    102.0,
+    102.0
+  ],
+  "instance": {
+    "n_tasks": 28,
+    "n_workers": 4,
+    "n_stations": 4
+  },
+  "parameters": {
+    "seed": 104,
+    "pop_size": 100,
+    "generations": 100,
+    "elite": 0.2,
+    "mutant": 0.1,
+    "elite_bias": 0.7,
+    "ls_freq": 25,
+    "ls_iters": 30
+  },
+  "statistics": {
+    "replicas": 10,
+    "best_cycle_time": 102.0,
+    "mean_cycle_time": 105.3,
+    "std_cycle_time": 1.1874342087037917,
+    "mean_exec_time": 4.204604053497315,
+    "all_cycle_times": [
+      105.0,
+      106.0,
+      106.0,
+      105.0,
+      102.0,
+      106.0,
+      106.0,
+      105.0,
+      106.0,
+      106.0
+    ]
+  }
+}
