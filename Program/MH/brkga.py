@@ -19,52 +19,56 @@ from Program.Problem.decoder import RandomKeyDecoder
 class BRKGA:
     """Implementa o algoritmo BRKGA para o ALWABP"""
     
-    def __init__(self, 
-                 instance: ALWABPInstance,
-                 decoder: RandomKeyDecoder,
-                 population_size: int = 100,
-                 elite_size: float = 0.2,
-                 mutant_size: float = 0.1,
-                 elite_bias: float = 0.7):
+    def __init__(
+        self,
+        instance: ALWABPInstance,
+        decoder: RandomKeyDecoder,
+        population_size: int = 100,
+        elite_size: float = 0.2,
+        mutant_size: float = 0.1,
+        elite_bias: float = 0.7,
+    ):
+        """Inicializa o BRKGA.
+
+        Pequenas salvaguardas garantem ao menos 1 elite e 1 mutante
+        quando os parâmetros produzirem valores muito baixos, evitando
+        populações degeneradas sem alterar o comportamento típico.
         """
-        Inicializa o BRKGA
-        
-        Args:
-            instance: instância do problema
-            decoder: decodificador de chaves aleatórias
-            population_size: tamanho da população
-            elite_size: proporção de indivíduos elite
-            mutant_size: proporção de indivíduos mutantes
-            elite_bias: probabilidade de herdar gene do elite no crossover
-        """
+
         self.instance = instance
         self.decoder = decoder
         self.population_size = population_size
-        self.elite_count = int(population_size * elite_size)
-        self.mutant_count = int(population_size * mutant_size)
+        self.elite_count = max(1, int(population_size * elite_size))
+        self.mutant_count = max(1, int(population_size * mutant_size))
         self.elite_bias = elite_bias
-        
+
         # Tamanho do cromossomo: n_tasks + n_workers
         self.chromosome_size = instance.n_tasks + instance.n_workers
-        
+
         # População: matriz onde cada linha é um cromossomo
         self.population = np.zeros((population_size, self.chromosome_size))
-        
+
         # Fitness de cada indivíduo (minimização: menor é melhor)
         self.fitness = np.full(population_size, np.inf)
-        
+
         # Melhor solução encontrada
         self.best_chromosome = None
         self.best_solution = None
         self.best_fitness = np.inf
         
+        # Controle de estagnação para reinicialização
+        self.generations_without_improvement = 0
+        self.stagnation_limit = 30  # Reinicializar após 30 gerações sem melhoria
+        
     def initialize_population(self):
         """Inicializa a população com chaves aleatórias uniformes [0, 1]"""
         self.population = np.random.rand(self.population_size, self.chromosome_size)
         
-        # Avaliar população inicial
+        # Avaliar população inicial com estratégias diversificadas
         for i in range(self.population_size):
-            solution = self.decoder.decode(self.population[i])
+            # Distribuir estratégias uniformemente na população inicial
+            strategy = i % 3
+            solution = self.decoder.decode(self.population[i], strategy=strategy)
             
             # Verificar factibilidade
             if solution.is_feasible():
@@ -89,6 +93,13 @@ class BRKGA:
             Melhor solução encontrada
         """
         for generation in range(generations):
+            # Verificar estagnação e reinicializar parcialmente se necessário
+            if self.generations_without_improvement >= self.stagnation_limit:
+                if verbose:
+                    print(f"  >>> Reinicialização parcial (estagnado por {self.stagnation_limit} gerações)")
+                self._partial_restart()
+                self.generations_without_improvement = 0
+            
             # Classificar população por fitness
             sorted_indices = np.argsort(self.fitness)
             self.population = self.population[sorted_indices]
@@ -106,7 +117,7 @@ class BRKGA:
             new_population[mutant_start:mutant_end] = np.random.rand(self.mutant_count, self.chromosome_size)
             
             # Gerar descendentes por crossover
-            offspring_count = self.population_size - self.elite_count - self.mutant_count
+            offspring_count = max(0, self.population_size - self.elite_count - self.mutant_count)
             for i in range(offspring_count):
                 idx = self.elite_count + self.mutant_count + i
                 new_population[idx] = self._crossover()
@@ -116,7 +127,13 @@ class BRKGA:
             
             # Avaliar nova população (exceto elite que já foi avaliada)
             for i in range(self.elite_count, self.population_size):
-                solution = self.decoder.decode(self.population[i])
+                # Escolher estratégia: adaptativa para mutantes, distribuída para outros
+                if i < self.elite_count + self.mutant_count:
+                    strategy = None  # Adaptativa
+                else:
+                    strategy = i % 3  # Distribuída
+                
+                solution = self.decoder.decode(self.population[i], strategy=strategy)
                 
                 # Verificar factibilidade e penalizar se necessário
                 if solution.is_feasible():
@@ -158,6 +175,29 @@ class BRKGA:
                 offspring[gene] = self.population[non_elite_idx][gene]
         
         return offspring
+    
+    def _partial_restart(self):
+        """
+        Reinicializa 40% da população (mantendo elite protegida)
+        Útil para escapar de ótimos locais
+        """
+        # Quantidade a reinicializar (40% da população, excluindo elite)
+        restart_start = self.elite_count
+        restart_count = int(0.4 * self.population_size)
+        restart_end = min(restart_start + restart_count, self.population_size)
+        
+        # Reinicializar com novos cromossomos aleatórios
+        for i in range(restart_start, restart_end):
+            self.population[i] = np.random.rand(self.chromosome_size)
+            solution = self.decoder.decode(self.population[i])
+            self.fitness[i] = solution.cycle_time if solution.is_feasible() else np.inf
+        
+        # Garantir que melhor global está na população (substitui pior se necessário)
+        if self.best_chromosome is not None:
+            worst_idx = np.argmax(self.fitness)
+            if self.fitness[worst_idx] > self.best_fitness:
+                self.population[worst_idx] = self.best_chromosome.copy()
+                self.fitness[worst_idx] = self.best_fitness
     
     def get_best_solution(self) -> ALWABPSolution:
         """Retorna a melhor solução encontrada"""

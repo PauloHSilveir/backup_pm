@@ -21,7 +21,6 @@ from Program.Problem.alwabp_solution import ALWABPSolution
 from Program.Problem.decoder import RandomKeyDecoder
 from Program.MH.brkga import BRKGA
 from Program.MH.local_search import LocalSearch
-from Program.MH.elite_pool import ElitePool
 
 
 class RKO_BRKGA:
@@ -32,10 +31,9 @@ class RKO_BRKGA:
     def __init__(self, 
                  instance: ALWABPInstance,
                  population_size: int = 100,
-                 elite_size: float = 0.2,
-                 mutant_size: float = 0.1,
-                 elite_bias: float = 0.7,
-                 elite_pool_size: int = 10):
+                 elite_size: float = 0.25,
+                 mutant_size: float = 0.15,
+                 elite_bias: float = 0.75):
         """
         Inicializa o algoritmo RKO-BRKGA
         
@@ -45,12 +43,10 @@ class RKO_BRKGA:
             elite_size: proporção de indivíduos elite
             mutant_size: proporção de indivíduos mutantes
             elite_bias: viés para herança de genes do elite
-            elite_pool_size: tamanho do pool de soluções elite globais
         """
         self.instance = instance
         self.decoder = RandomKeyDecoder(instance)
         self.local_search = LocalSearch(instance)
-        self.elite_pool = ElitePool(max_size=elite_pool_size, min_distance=0.15)
         
         self.brkga = BRKGA(
             instance=instance,
@@ -63,15 +59,16 @@ class RKO_BRKGA:
         
         self.best_solution = None
         self.best_cycle_time = np.inf
+        self.initial_solution = None
+        self.initial_cycle_time = np.inf
         self.execution_time = 0
-        self.generations_without_improvement = 0
-        self.last_best_fitness = np.inf
+        self.optimal_value = None
         
     def solve(self, 
               brkga_generations: int = 100,
               local_search_freq: int = 10,
-              local_search_iterations: int = 50,
-              restart_threshold: int = 50,
+              local_search_iterations: int = 100,
+              optimal_value: float = None,
               verbose: bool = True) -> Tuple[ALWABPSolution, float]:
         """
         Executa o algoritmo RKO-BRKGA completo
@@ -80,13 +77,16 @@ class RKO_BRKGA:
             brkga_generations: número de gerações do BRKGA
             local_search_freq: frequência (em gerações) para aplicar busca local
             local_search_iterations: iterações da busca local
-            restart_threshold: gerações sem melhoria para acionar restart
+            optimal_value: valor da solução ótima (para cálculo de gap)
             verbose: se True, imprime progresso detalhado
             
         Returns:
             Tupla (melhor solução, tempo de execução)
         """
         start_time = time.time()
+        
+        # Armazenar valor ótimo se fornecido
+        self.optimal_value = optimal_value
         
         if verbose:
             print("=" * 70)
@@ -107,18 +107,14 @@ class RKO_BRKGA:
         self.best_solution = self.brkga.get_best_solution()
         self.best_cycle_time = self.brkga.get_best_fitness()
         
-        # Adicionar melhor inicial ao pool de elite
-        self.elite_pool.add(self.best_solution)
+        # Armazenar solução inicial (SI)
+        self.initial_solution = self.best_solution
+        self.initial_cycle_time = self.best_cycle_time
         
         if verbose:
             print(f"  População inicial criada")
             print(f"  Melhor solução inicial: {self.best_cycle_time:.2f}")
             print(f"  Factível: {self.best_solution.is_feasible()}")
-            print(f"  Pool de elite: {self.elite_pool}")
-        
-        if verbose:
-            print(f"Melhor solução inicial: {self.best_cycle_time:.2f}")
-            print(f"Factível: {self.best_solution.is_feasible()}")
         
         # Fase 2: Evolução do BRKGA com busca local periódica
         if verbose:
@@ -130,44 +126,53 @@ class RKO_BRKGA:
             
             # Aplicar busca local periodicamente
             if (generation + 1) % local_search_freq == 0:
-                current_best = self.brkga.get_best_solution()
-                
                 if verbose:
                     print(f"\n  Geração {generation + 1}: Aplicando busca local...")
-                    print(f"    Antes da BL: {current_best.cycle_time:.2f}")
                 
-                # Aplicar busca local
-                improved_solution = self.local_search.improve(
-                    current_best, 
-                    max_iterations=local_search_iterations
-                )
+                # Aplicar BL nas TOP-3 soluções elite para explorar mais
+                sorted_idx = np.argsort(self.brkga.fitness)
+                top_k = min(3, self.brkga.elite_count)
                 
-                if verbose:
-                    print(f"    Depois da BL: {improved_solution.cycle_time:.2f}")
-                    improvement = current_best.cycle_time - improved_solution.cycle_time
-                    print(f"    Melhoria: {improvement:.2f}")
+                best_improvement = 0
+                best_improved = None
                 
-                # Atualizar melhor solução global
-                if improved_solution.cycle_time < self.best_cycle_time:
-                    self.best_solution = improved_solution
-                    self.best_cycle_time = improved_solution.cycle_time
+                for k in range(top_k):
+                    idx = sorted_idx[k]
+                    current_solution = self.decoder.decode(self.brkga.population[idx])
+                    current_fitness = self.brkga.fitness[idx]
+                    
+                    # Aplicar busca local
+                    improved_solution = self.local_search.improve(
+                        current_solution, 
+                        max_iterations=local_search_iterations
+                    )
+                    
+                    improvement = current_fitness - improved_solution.cycle_time
+                    
+                    if k == 0 and verbose:
+                        print(f"    Melhor global: {current_fitness:.2f} → {improved_solution.cycle_time:.2f} (melhoria: {improvement:.2f})")
+                    
+                    # Rastrear melhor melhoria
+                    if improvement > best_improvement:
+                        best_improvement = improvement
+                        best_improved = improved_solution
+                    
+                    # Atualizar melhor global se encontrou algo melhor
+                    if improved_solution.cycle_time < self.best_cycle_time:
+                        self.best_solution = improved_solution
+                        self.best_cycle_time = improved_solution.cycle_time
+                    
+                    # Inserir solução melhorada na população (substituindo pior)
+                    if improvement > 0:
+                        improved_chromosome = self.decoder.encode(improved_solution)
+                        worst_idx = np.argmax(self.brkga.fitness)
+                        self.brkga.population[worst_idx] = improved_chromosome
+                        self.brkga.fitness[worst_idx] = improved_solution.cycle_time
                 
-                # Adicionar ao pool de elite
-                added_to_pool = self.elite_pool.add(improved_solution)
-                if verbose and added_to_pool:
-                    print(f"    Adicionada ao pool de elite: {self.elite_pool}")
-                
-                # Inserir solução melhorada na população
-                # Codificar solução de volta para cromossomo
-                improved_chromosome = self.decoder.encode(improved_solution)
-                
-                # Substituir o pior indivíduo da população
-                worst_idx = np.argmax(self.brkga.fitness)
-                self.brkga.population[worst_idx] = improved_chromosome
-                self.brkga.fitness[worst_idx] = improved_solution.cycle_time
-                
-                if verbose:
-                    print(f"    Solução inserida na população (substituiu pior: {self.brkga.fitness[worst_idx]:.2f})")
+                if verbose and best_improvement > 0:
+                    print(f"    Melhor melhoria encontrada: {best_improvement:.2f}")
+                elif verbose:
+                    print(f"    Nenhuma melhoria encontrada nas top-{top_k} soluções")
 
             
             # Atualizar melhor solução global
@@ -175,21 +180,6 @@ class RKO_BRKGA:
             if current_best_fitness < self.best_cycle_time:
                 self.best_solution = self.brkga.get_best_solution()
                 self.best_cycle_time = current_best_fitness
-                self.elite_pool.add(self.best_solution)
-                self.generations_without_improvement = 0
-                self.last_best_fitness = self.best_cycle_time
-            else:
-                self.generations_without_improvement += 1
-            
-            # Restart inteligente quando convergir
-            if self.generations_without_improvement >= restart_threshold and not self.elite_pool.is_empty():
-                if verbose:
-                    print(f"\n  *** RESTART em geração {generation + 1} ***")
-                    print(f"      Sem melhoria por {self.generations_without_improvement} gerações")
-                    print(f"      Reiniciando população com elites do pool...")
-                
-                self._restart_with_elite_pool(verbose)
-                self.generations_without_improvement = 0
             
             # Progresso a cada 20 gerações
             if verbose and (generation + 1) % 20 == 0:
@@ -218,82 +208,59 @@ class RKO_BRKGA:
         # Resultados finais
         if verbose:
             print(f"  Depois da BL final: {self.best_cycle_time:.2f}")
-            print("\n" + "=" * 70)
-            print("RESULTADOS FINAIS")
-            print("=" * 70)
-            print(f"Melhor tempo de ciclo: {self.best_cycle_time:.2f}")
-            print(f"Solução factível: {self.best_solution.is_feasible()}")
-            print(f"Pool de elite final: {self.elite_pool}")
-            print(f"Tempo de execução: {self.execution_time:.2f} segundos")
-            print("=" * 70)
+            self._print_computational_results(optimal_value=self.optimal_value)
         
         return self.best_solution, self.execution_time
-    
-    def _restart_with_elite_pool(self, verbose: bool = False):
-        """
-        Reinicia população usando soluções do pool de elite.
-        Mantém elite atual e preenche resto com perturbações das elites do pool.
-        """
-        # Obter top elites do pool
-        top_elites = self.elite_pool.get_top_k(min(5, self.elite_pool.size()))
-        
-        if verbose:
-            print(f"      Usando {len(top_elites)} elites do pool")
-        
-        # Criar nova população
-        new_population = np.zeros_like(self.brkga.population)
-        new_fitness = np.zeros_like(self.brkga.fitness)
-        
-        idx = 0
-        
-        # Preencher com elites do pool (codificadas + perturbadas)
-        for elite_sol in top_elites:
-            if idx >= self.brkga.population_size:
-                break
-            
-            # Adicionar elite original
-            chromosome = self.decoder.encode(elite_sol)
-            new_population[idx] = chromosome
-            new_fitness[idx] = elite_sol.cycle_time
-            idx += 1
-            
-            # Adicionar versões perturbadas da elite (diversificação)
-            n_perturbations = min(3, (self.brkga.population_size - idx) // len(top_elites))
-            for _ in range(n_perturbations):
-                if idx >= self.brkga.population_size:
-                    break
-                    
-                # Perturbar cromossomo (20% dos genes)
-                perturbed = chromosome.copy()
-                n_genes_perturb = int(0.2 * len(chromosome))
-                perturb_idx = np.random.choice(len(chromosome), n_genes_perturb, replace=False)
-                perturbed[perturb_idx] = np.random.rand(n_genes_perturb)
-                
-                # Decodificar e avaliar
-                perturbed_sol = self.decoder.decode(perturbed)
-                new_population[idx] = perturbed
-                new_fitness[idx] = perturbed_sol.cycle_time
-                idx += 1
-        
-        # Preencher restante com soluções aleatórias
-        while idx < self.brkga.population_size:
-            new_population[idx] = np.random.rand(self.brkga.chromosome_size)
-            sol = self.decoder.decode(new_population[idx])
-            new_fitness[idx] = sol.cycle_time
-            idx += 1
-        
-        # Substituir população
-        self.brkga.population = new_population
-        self.brkga.fitness = new_fitness
-        
-        if verbose:
-            best_after = np.min(new_fitness)
-            avg_after = np.mean(new_fitness[new_fitness < np.inf])
-            print(f"      População reiniciada: melhor={best_after:.2f}, média={avg_after:.2f}")
     
     def get_best_solution(self) -> ALWABPSolution:
         """Retorna a melhor solução encontrada"""
         return self.best_solution
+    
+    def _print_computational_results(self, optimal_value=None):
+        """
+        Imprime tabela de resultados computacionais conforme especificação.
+        
+        Args:
+            optimal_value: valor da solução ótima (se disponível)
+        """
+        print("\n" + "=" * 90)
+        print("RESULTADOS COMPUTACIONAIS")
+        print("=" * 90)
+        
+        # Valores
+        si = self.initial_cycle_time
+        sf = self.best_cycle_time
+        
+        # Desvio SI-SF: 100 × (SI - SF) / SI
+        desvio_si_sf = 100 * (si - sf) / si if si > 0 else 0.0
+        
+        # Desvio SF-Ótimo: 100 × (SF - Ótimo) / Ótimo
+        desvio_otimo = None
+        if optimal_value is not None and optimal_value > 0:
+            desvio_otimo = 100 * (sf - optimal_value) / optimal_value
+        
+        # Cabeçalho da tabela
+        print(f"\n{'Métrica':<40} {'Valor':>15}")
+        print("-" * 90)
+        
+        # Dados
+        print(f"{'Solução Inicial (SI)':<40} {si:>15.2f}")
+        print(f"{'Solução Final (SF)':<40} {sf:>15.2f}")
+        print(f"{'Desvio SI-SF (%)':<40} {desvio_si_sf:>15.2f}")
+        
+        if desvio_otimo is not None:
+            print(f"{'Desvio SF-Ótimo (%)':<40} {desvio_otimo:>15.2f}")
+        else:
+            print(f"{'Desvio SF-Ótimo (%)':<40} {'N/A':>15}")
+        
+        print(f"{'Tempo Computacional (s)':<40} {self.execution_time:>15.2f}")
+        print(f"{'Solução Factível':<40} {str(self.best_solution.is_feasible()):>15}")
+        
+        print("=" * 90)
+        print(f"\nFórmula SI-SF: 100 × ({si:.2f} - {sf:.2f}) / {si:.2f} = {desvio_si_sf:.2f}%")
+        if desvio_otimo is not None:
+            print(f"Fórmula SF-Ótimo: 100 × ({sf:.2f} - {optimal_value:.2f}) / {optimal_value:.2f} = {desvio_otimo:.2f}%")
+        print("=" * 90)
     
     def print_solution_details(self):
         """Imprime detalhes da melhor solução"""

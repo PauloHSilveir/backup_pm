@@ -1,4 +1,5 @@
 import sys
+import time
 from gurobipy import Model, GRB, quicksum
 import math
 
@@ -58,6 +59,8 @@ for i in N:
 I_w = {w: set() for w in W}
 
 # 3) Modelo 
+
+start_time = time.time()
 
 model = Model("ALWABP")
 model.setParam('OutputFlag', 0)
@@ -119,12 +122,21 @@ for (i, j) in precedence:
 # 5) Objetivo
 
 model.setObjective(C, GRB.MINIMIZE)
-model.optimize()
+
+try:
+    model.optimize()
+    solve_time = time.time() - start_time
+except Exception as e:
+    solve_time = time.time() - start_time
+    print(f"Erro ao otimizar: {e}", file=sys.stderr)
+    print(f"Tempo decorrido: {solve_time:.2f} segundos", file=sys.stderr)
+    sys.exit(1)
 
 # 6) Output
 
 if model.Status != GRB.OPTIMAL:
-    print("Nenhuma solução ótima encontrada.")
+    print(f"Nenhuma solução ótima encontrada. Status: {model.Status}", file=sys.stderr)
+    print(f"Tempo decorrido: {solve_time:.2f} segundos", file=sys.stderr)
     sys.exit(0)
 
 # Estação -> trabalhador
@@ -161,4 +173,5 @@ for s in S:
         print(f'  station{s} -> task{t};')
 
 print(f'  C[label="Ciclo ótimo: {C.X:.2f}"];')
+print(f'  Time[label="Tempo: {solve_time:.2f}s"];')
 print("}")

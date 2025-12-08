@@ -82,8 +82,11 @@ class LocalSearch:
         tasks = list(range(n_tasks))
         random.shuffle(tasks)
         
-        for i in tasks[:min(20, n_tasks)]:  # Limitar tentativas
-            for j in tasks[:min(20, n_tasks)]:
+        best_improvement = 0
+        best_i, best_j = -1, -1
+        
+        for i in tasks[:min(30, n_tasks)]:  # Mais tentativas
+            for j in tasks[:min(30, n_tasks)]:
                 if i >= j:
                     continue
                 
@@ -133,19 +136,30 @@ class LocalSearch:
                 if i in self.instance.incompatible_tasks[worker_j]:
                     continue
                 
-                # Fazer troca
+                # Testar troca
                 old_cycle_time = solution.cycle_time
                 solution.task_assignment[i] = station_j
                 solution.task_assignment[j] = station_i
                 solution.calculate_cycle_time()
                 
-                if solution.cycle_time < old_cycle_time:
-                    return True
-                else:
-                    # Desfazer troca
-                    solution.task_assignment[i] = station_i
-                    solution.task_assignment[j] = station_j
-                    solution.cycle_time = old_cycle_time
+                improvement = old_cycle_time - solution.cycle_time
+                if improvement > best_improvement:
+                    best_improvement = improvement
+                    best_i, best_j = i, j
+                
+                # Desfazer troca
+                solution.task_assignment[i] = station_i
+                solution.task_assignment[j] = station_j
+                solution.cycle_time = old_cycle_time
+        
+        # Aplicar melhor troca encontrada
+        if best_i >= 0:
+            station_i = solution.task_assignment[best_i]
+            station_j = solution.task_assignment[best_j]
+            solution.task_assignment[best_i] = station_j
+            solution.task_assignment[best_j] = station_i
+            solution.calculate_cycle_time()
+            return True
         
         return False
     
@@ -218,7 +232,7 @@ class LocalSearch:
         tasks = list(range(n_tasks))
         random.shuffle(tasks)
         
-        for task in tasks[:min(20, n_tasks)]:
+        for task in tasks[:min(40, n_tasks)]:  # Mais tentativas
             old_station = solution.task_assignment[task]
             
             stations = list(range(n_stations))

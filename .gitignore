@@ -1,15 +1,50 @@
-pycache/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pdb
 *.pyo
 *.pyd
-*.pdb
+
+# Virtual environments
 venv/
 env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
 .VSCode/
 .idea/
-.DS_Store
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Results
+Results/*.json
 output/
+*.dot
+*.png
+
+# Temporary files
+*.tmp
+*.bak
+teste.txt
+exemplo_uso.txt
+
+# Solver outputs
+*.lp
+*.mps
+*.sol
